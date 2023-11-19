@@ -341,13 +341,23 @@ def Successful_Registration_Page():
 
     SuccRegPg_window.mainloop()
 
+#Get Details function
 def Get_Details(firstname_entry, lastname_entry, password_entry, confirmpassword_entry, companyname_entry, EmpPg_companyid_entry, AdPg_companyid_entry, user_type):
+    #Gets all necessary information
     firstname = firstname_entry.get()
     lastname = lastname_entry.get()
     password = password_entry.get()
     confirmpassword = confirmpassword_entry.get()
     companyname = companyname_entry.get()
+
+    #creates the database if it doesn't exist
+    with sqlite3.connect("EmployeeDetails.db") as connection:
+        #sets cursor
+        cursor = connection.cursor()
+        #company ID is intege, as is an 8 digit numbe
+        cursor.execute("CREATE TABLE IF NOT EXISTS User_Details (FirstName TEXT, LastName TEXT, Password TEXT, CompanyName TEXT, CompanyID INTEGER, UserType TEXT)")
     
+    #Sees if it has to get employee or admin company id, by seeing which one exists
     if EmpPg_companyid_entry:
         emppgcompanyid = EmpPg_companyid_entry.get()
     else:
@@ -358,91 +368,107 @@ def Get_Details(firstname_entry, lastname_entry, password_entry, confirmpassword
     else:
         adpgcompanyid = None
 
+    #if verify details function returns true, then runs the write to details function
     if Verify_Details(firstname, lastname, password, confirmpassword, companyname, adpgcompanyid, emppgcompanyid):
         Write_User_Details_To_File(firstname, lastname, password, companyname, adpgcompanyid, emppgcompanyid, user_type)
+        #destroys the current window, and uses Load_Page to load necessary pages
         window.destroy()
         Load_Page(window, Successful_Registration_Page())
     else:
         window.destroy()
         Load_Page(window, Invalid_Details_Page())    
 
+#Verify details function
 def Verify_Details(firstname, lastname, password, confirmpassword, companyname, adpgcompanyid, emppgcompanyid):
     
+    #Checks if there is an input in the entries or not, by seeing if they are less than 1
     if len(firstname) < 1 or len(lastname) < 1 or len(password) < 1 or len(confirmpassword) < 1 or len(companyname) < 1:
         return False
     
+    #Checks if password matches confirm password
     if password != confirmpassword:
         return False
     
+    #Sees if admin company id exists, and if so if it is 8 digits or not, same for admin
     if adpgcompanyid is not None and len(adpgcompanyid) != 8:
         return False
     if emppgcompanyid is not None and len(emppgcompanyid) != 8:
         return False
-        
+    
+    #checks if every entry is an integer or a character. company id is converted into a string so this is possible.
     for entry in [firstname, lastname, password, confirmpassword, companyname, str(adpgcompanyid), str(emppgcompanyid)]:
         if not entry.isalnum():
             return False
-        
+
+    #Connects to database
     with sqlite3.connect("EmployeeDetails.db") as connection:
         cursor = connection.cursor()
-        # Check for existing details (excluding company ID)
-        cursor.execute("SELECT * FROM Users WHERE FirstName = ? AND LastName = ? AND Password = ? AND CompanyName = ?", (firstname, lastname, password, companyname))
+        #Check for existing details (excluding company ID)
+        cursor.execute("SELECT * FROM User_Details WHERE FirstName = ? AND LastName = ? AND Password = ? AND CompanyName = ?", (firstname, lastname, password, companyname))
         match = cursor.fetchone()
         if match:
-            return False  # Details already exist
+            return False  #Details already exist
     
+        #if its an employee
         if emppgcompanyid is not None:
-            cursor.execute("SELECT CompanyID FROM Users WHERE CompanyID = ?", (emppgcompanyid,))
+            cursor.execute("SELECT CompanyID FROM User_Details WHERE CompanyID = ?", (emppgcompanyid,))
             match = cursor.fetchone()
             if not match:
-                return False  # Company ID does not exist
-    
+                return False  #Company ID does not exist
+            
+    #returns true if passes all verifictations.
     return True
-    
+
+
+#Function to write user details to the database
 def Write_User_Details_To_File(firstname, lastname, password, companyname, adpgcompanyid, emppgcompanyid, user_type):
+    #If there's an admin company ID or employee company ID, then use it as a unique ID
     if adpgcompanyid:
         uniquecompid = adpgcompanyid
     elif emppgcompanyid:
         uniquecompid = emppgcompanyid
 
-    # Connect to DB (or create file if not exist)
+    #Connect to the EmployeeDetails database
     with sqlite3.connect("EmployeeDetails.db") as connection:
         cursor = connection.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS Users (FirstName TEXT, LastName TEXT, Password TEXT, CompanyName TEXT, CompanyID INTEGER, UserType TEXT)")
 
-        # Determine the user type based on the provided argument
+        #Determine the user type, based of arugment that its lower case
         if user_type.lower() == 'admin':
             user_type = 'admin'
         else:
             user_type = 'employee'
 
-        # Explicitly specify column names in the INSERT statement
-        cursor.execute("INSERT INTO Users (FirstName, LastName, Password, CompanyName, CompanyID, UserType) VALUES (?, ?, ?, ?, ?, ?)",
-                       (firstname, lastname, password, companyname, uniquecompid, user_type))
+        #Insert user details into the User_Details table
+        cursor.execute("INSERT INTO User_Details (FirstName, LastName, Password, CompanyName, CompanyID, UserType) VALUES (?, ?, ?, ?, ?, ?)", (firstname, lastname, password, companyname, uniquecompid, user_type))
         connection.commit()
 
+#Function to handle user login
 def Login(companyname, lastname, password):
+    #sets variable as login, as uses two different parameters, company name and lastname, hence is simpler to set as global, to be used in other functions.
     global logged_in_as
+    #connects to database
     with sqlite3.connect("EmployeeDetails.db") as connection:
         cursor = connection.cursor()
 
-        if companyname:  # If companyname exists (admin login)
-            # Check if admin credentials match
-            cursor.execute("SELECT * FROM Users WHERE CompanyName = ? AND Password = ?", (companyname, password))
+        if companyname:  #If companyname exists (admin login)
+            #Check if admin credentials match in the User_Details table
+            cursor.execute("SELECT * FROM User_Details WHERE CompanyName = ? AND Password = ?", (companyname, password))
             match = cursor.fetchone()
+            #if theres a match
             if match:
                 user_type = match[-1]  # Get the UserType column value
                 if user_type.lower() == 'admin':
                     logged_in_as = (companyname)
+                    #Loads correspodnding page
                     Load_Page(window, "admin_main_page")
                 else:
                     Load_Page(window, "invalid_details_page")
             else:
                 Load_Page(window, "invalid_details_page")
 
-        else:  # If companyname doesn't exist (employee login)
-            # Check if employee credentials match
-            cursor.execute("SELECT * FROM Users WHERE LastName = ? AND Password = ?", (lastname, password))
+        else:  #If companyname doesn't exist (employee login)
+            #Check if employee credentials match in the 'User_Details' table
+            cursor.execute("SELECT * FROM User_Details WHERE LastName = ? AND Password = ?", (lastname, password))
             match = cursor.fetchone()
             if match:
                 user_type = match[-1]  # Get the UserType column value
@@ -454,7 +480,7 @@ def Login(companyname, lastname, password):
             else:
                 Load_Page(window, "invalid_details_page")
 
-
+#loads code
 if __name__ == "__main__":
     Load_Saved_Colour_Changes(default_theme, default_appearance)
     Login_Page()
